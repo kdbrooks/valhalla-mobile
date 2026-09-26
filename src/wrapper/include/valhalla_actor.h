@@ -7,6 +7,7 @@
 #include <functional>
 #include <stdexcept>
 #include <string>
+#include <vector>
 #include <valhalla/tyr/actor.h>
 #include <valhalla/baldr/tilegetter.h>
 
@@ -145,6 +146,9 @@ public:
     static constexpr const char* kCancelledMessage = "valhalla-mobile: cancelled";
     /// The exact text of the error when a tile fetch failed, other than with a 404 or 410.
     static constexpr const char* kFetchFailedMessage = "valhalla-mobile: tile fetch failed";
+    /// The exact text of the error when [ensure_tile_cached] fetched a tile but could not
+    /// write it to `mjolnir.tile_dir`.
+    static constexpr const char* kNotStoredMessage = "valhalla-mobile: tile not stored";
 
     /// Raised when an action gave up because `mjolnir.tile_url_timeout` elapsed.
     ///
@@ -226,6 +230,52 @@ public:
      * @return         the serialized response, in whichever format the request asked for
      */
     std::string matrix(const std::string& request);
+
+    /// One tile of the hierarchy, and the path it is fetched by.
+    struct TileRef {
+        /// Hierarchy level. 0 is 4 degrees, 1 is 1 degree, 2 is 0.25 degrees.
+        uint32_t level = 0;
+        /// Tile id within that level.
+        uint32_t id = 0;
+        /// The path `mjolnir.tile_url`'s {tilePath} is replaced with, e.g. "2/000/818/660.gph".
+        ///
+        /// Always the uncompressed name. With `tile_url_gz` on the CACHED file is .gph.gz,
+        /// but the URL is unchanged -- CacheTileURL builds the fetch name from the plain
+        /// suffix, so the two differ deliberately.
+        std::string path;
+    };
+
+    /**
+     * The tiles covering one coordinate, one per hierarchy level.
+     *
+     * From `TileHierarchy::levels()` and `GraphTile::FileSuffix`, so a consumer that plans
+     * downloads needs no copy of the grid arithmetic. Copies drift: an edge case such as a
+     * NaN or a pole is easily handled differently in each one.
+     *
+     * Static: it needs no actor, so it answers even while one can't be built.
+     */
+    static std::vector<TileRef> tiles_covering(double latitude, double longitude);
+
+    /**
+     * Ensure one tile is in `mjolnir.tile_dir`, fetching it if it is not.
+     *
+     * This is the prefetch, and it deliberately does no downloading of its own: it calls
+     * `GraphReader::GetGraphTile`, so a prefetched tile arrives through exactly the path a
+     * route would have used -- same cache, same naming, same gzip handling, same id.txt and
+     * rebuild detection. A second downloader would be a second set of all of those.
+     *
+     * @return true when the tile is now cached, false when the origin does not have it.
+     *         Throws on a cancel, a fetch that failed other than with a 404 or 410, or a
+     *         tile that could not be written to `tile_dir`. It makes one request, so the
+     *         deadline never stops it. Valhalla's own errors
+     *         pass through too, such as 446 when the tile set was rebuilt since `tile_dir`
+     *         was filled, or a tile id that is out of range.
+     *
+     * A false is normal and is not an error: a tile that is all sea has no roads, so a tile
+     * set need not include it. A prefetch that treated a miss as failure could not prepare any
+     * coastal or border region.
+     */
+    bool ensure_tile_cached(uint32_t level, uint32_t id);
 };
 
 #endif // VALHALLAACTOR_H

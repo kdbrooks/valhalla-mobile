@@ -1,7 +1,9 @@
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <exception>
 #include <limits>
 #include <memory>
@@ -18,10 +20,13 @@
 #include <boost/property_tree/ptree.hpp>
 #include <valhalla/tyr/actor.h>
 #include <valhalla/baldr/compression_utils.h>
+#include <valhalla/baldr/graphid.h>
 #include <valhalla/baldr/graphtile.h>
 #include <valhalla/baldr/graphtileheader.h>
 #include <valhalla/baldr/rapidjson_utils.h>
+#include <valhalla/baldr/tilehierarchy.h>
 #include <valhalla/loki/worker.h>
+#include <valhalla/midgard/pointll.h>
 #include "valhalla_actor.h"
 
 namespace {
@@ -277,6 +282,32 @@ public:
     retry_.clear();
   }
 
+  /// Whether fetched tiles are written to tile_dir: there is one, and no tile extract, which
+  /// valhalla would read instead.
+  bool stores_fetched_tiles() const {
+    return !tile_dir_.empty() && tile_extract_->tiles.empty();
+  }
+
+  /// Whether a tile is in tile_dir, gzipped or not. Valhalla writes each to a temporary file
+  /// and renames it, so a tile that is there is whole.
+  bool stored(const valhalla::baldr::GraphId& graphid) const {
+    for (const auto& suffix :
+         {valhalla::baldr::SUFFIX_NON_COMPRESSED, valhalla::baldr::SUFFIX_COMPRESSED}) {
+      std::error_code error;
+      if (std::filesystem::exists(std::filesystem::path(tile_dir_) /
+                                      valhalla::baldr::GraphTile::FileSuffix(graphid, suffix),
+                                  error)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Whether a tile is in the memory cache.
+  bool in_memory(const valhalla::baldr::GraphId& graphid) const {
+    return cache_->Contains(graphid);
+  }
+
 private:
   const std::atomic<uint32_t>* failures_;
   std::vector<valhalla::baldr::GraphId> retry_;
@@ -462,6 +493,75 @@ void ValhallaActor::cancel() {
 
 void ValhallaActor::resume() {
     cancelled->store(false, std::memory_order_relaxed);
+}
+
+std::vector<ValhallaActor::TileRef> ValhallaActor::tiles_covering(double latitude,
+                                                                 double longitude) {
+    std::vector<TileRef> covering;
+    // A coordinate off the planet has no tiles rather than a wrong one. PointLL would
+    // happily construct and TileId would return an index into nothing.
+    if (!std::isfinite(latitude) || !std::isfinite(longitude) || latitude < -90.0 ||
+        latitude > 90.0 || longitude < -180.0 || longitude > 180.0) {
+      return covering;
+    }
+
+    const valhalla::midgard::PointLL point{longitude, latitude};
+    // What a tile is called when REQUESTED, which is not what it is called on disk.
+    // With tile_url_gz on, GraphTile::store() writes .gph.gz, but
+    // CacheTileURL builds the fetch name from the plain suffix -- the URL does not change.
+    // So this is always the uncompressed name, and the cached name is valhalla's business.
+    const std::string suffix = valhalla::baldr::SUFFIX_NON_COMPRESSED;
+    for (const auto& level : valhalla::baldr::TileHierarchy::levels()) {
+      TileRef ref;
+      ref.level = level.level;
+      ref.id = static_cast<uint32_t>(level.tiles.TileId(point));
+      ref.path = valhalla::baldr::GraphTile::FileSuffix(
+          valhalla::baldr::GraphId(ref.id, ref.level, 0), suffix, &level);
+      covering.push_back(ref);
+    }
+    return covering;
+}
+
+bool ValhallaActor::ensure_tile_cached(uint32_t level, uint32_t id) {
+    // Armed like any other action, so the deadline and cancel both apply. No deep stack:
+    // that exists for the map matcher's unbounded recursion, and this is one fetch.
+    arm_deadline();
+    // The reader is always a RetryingGraphReader; see the constructor.
+    auto& reader = static_cast<RetryingGraphReader&>(*graph_reader);
+    const valhalla::baldr::GraphId graphid(id, level, 0);
+    const bool into_tile_dir = reader.stores_fetched_tiles();
+    if (into_tile_dir) {
+        // Done already, and reading the tile would only load it into memory.
+        if (reader.stored(graphid)) {
+            return true;
+        }
+        // Left in memory by an earlier action, but its file is gone. Valhalla would answer
+        // from memory, so the cache goes, and the tile is fetched again.
+        if (reader.in_memory(graphid)) {
+            reader.Clear();
+        }
+    }
+    // GetGraphTile, not a download of our own: a prefetched tile arrives through exactly
+    // the path a route would have used, so there is one cache, one naming rule, one gzip
+    // decision, and one rebuild check rather than two of each. A deadline or a cancel
+    // leaves it as an exception, which nothing on this path catches.
+    const bool found = static_cast<bool>(reader.GetGraphTile(graphid));
+    // GetGraphTile keeps the tile in memory as well, and only an action's cleanup trims
+    // that. Without this, prefetching a region would hold all of it.
+    if (reader.OverCommitted()) {
+        reader.Trim();
+    }
+    if (!found) {
+        if (fetch_failed()) {
+            throw std::runtime_error(kFetchFailedMessage);
+        }
+        return false;
+    }
+    // Valhalla keeps a tile it could not write, such as on a full disk, and only logs it.
+    if (into_tile_dir && !reader.stored(graphid)) {
+        throw std::runtime_error(kNotStoredMessage);
+    }
+    return true;
 }
 
 bool ValhallaActor::fetch_failed() const {

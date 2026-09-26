@@ -29,6 +29,7 @@
 -keep class com.valhalla.config.models.** { *; }
 -keep class com.valhalla.api.models.** { *; }
 -keepclassmembers class com.valhalla.valhalla.ErrorResponse { *; }
+-keepclassmembers class com.valhalla.valhalla.TileRef { *; }
 
 # Moshi's Kotlin reflection adapter needs the metadata that describes default values and
 # nullability; without it every model with a default parameter fails to construct.

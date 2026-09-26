@@ -4,6 +4,7 @@ import android.content.Context
 import com.osrm.api.models.RouteResponse as OsrmRouteResponse
 import com.squareup.moshi.JsonDataException
 import com.squareup.moshi.Moshi
+import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import com.valhalla.api.models.DirectionsOptions
 import com.valhalla.api.models.HeightRequest
@@ -95,6 +96,10 @@ internal constructor(
    * under `matchings`, so no substring test can tell them apart.
    */
   private val errorAdapter = moshi.adapter(ErrorResponse::class.java).failOnUnknown()
+
+  private val tileRefsAdapter =
+      moshi.adapter<List<TileRef>>(
+          Types.newParameterizedType(List::class.java, TileRef::class.java))
 
   /**
    * Fetch a route from Valhalla.
@@ -334,6 +339,26 @@ internal constructor(
     error?.let { throw ValhallaException.Internal(it) }
     return rawResponse
   }
+
+  /**
+   * The tiles covering a coordinate, one per hierarchy level, or none for a coordinate that is
+   * not on the planet.
+   *
+   * It doesn't wait for an action that is running, and it still answers after [close].
+   */
+  fun tilesCovering(latitude: Double, longitude: Double): List<TileRef> =
+      tileRefsAdapter.fromJson(valhallaActor.tilesCovering(latitude, longitude)).orEmpty()
+
+  /**
+   * Ensure one tile is in `mjolnir.tile_dir`, fetching it through Valhalla if it is not.
+   *
+   * @return false for a tile the origin does not have, which is normal coverage rather than a
+   *   failure: a tile that is all sea has no roads, so a tile set need not include it.
+   * @throws ValhallaException.Internal when the fetch was cancelled or failed, or the tile could
+   *   not be written to `tile_dir`.
+   */
+  fun ensureTileCached(level: Int, tileId: Int): Boolean =
+      checkForError(valhallaActor.ensureTileCached(level, tileId)) == "true"
 
   /**
    * Ask the action running now to stop, before its next tile fetch or during its path search.

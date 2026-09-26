@@ -16,6 +16,10 @@ internal interface ValhallaActorProviding : Closeable {
 
   fun matrix(request: String): String
 
+  fun tilesCovering(latitude: Double, longitude: Double): String
+
+  fun ensureTileCached(level: Int, tileId: Int): String
+
   fun cancel()
 
   fun resume()
@@ -92,6 +96,29 @@ internal class ValhallaActor(
    * source and every target. Same assumptions as [route].
    */
   override fun matrix(request: String): String = perform(request, valhallaKotlin::matrix)
+
+  /**
+   * The tiles covering a coordinate, one per hierarchy level, as a JSON array of `{"level",
+   * "id", "path"}`. Empty for a coordinate that is not on the planet.
+   *
+   * Takes no lock: it reads valhalla's tile hierarchy and nothing of this actor's, so it answers
+   * while an action runs, and after [close].
+   */
+  override fun tilesCovering(latitude: Double, longitude: Double): String =
+      String(valhallaKotlin.tilesCovering(latitude, longitude), Charsets.UTF_8)
+
+  /**
+   * Ensure one tile is in `mjolnir.tile_dir`, fetching it through valhalla if it is not.
+   *
+   * `true` or `false` as JSON, or the error envelope when the fetch was cancelled or failed, or the
+   * tile could not be written. False is a tile the origin does not have, which is normal coverage
+   * rather than a failure.
+   */
+  override fun ensureTileCached(level: Int, tileId: Int): String =
+      synchronized(lock) {
+        check(handle != 0L) { "the Valhalla actor is closed" }
+        String(valhallaKotlin.ensureTileCached(handle, level, tileId), Charsets.UTF_8)
+      }
 
   /**
    * Ask the action running now to stop, before its next tile fetch or during its path search.

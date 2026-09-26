@@ -36,6 +36,27 @@
 /// @param request a `height` request as JSON.
 - (NSString*)height:(NSString*)request;
 
+/// The tiles covering a coordinate, one per hierarchy level.
+///
+/// Each entry is `@{@"level": NSNumber, @"id": NSNumber, @"path": NSString}`. The path is
+/// what `mjolnir.tile_url`'s {tilePath} is replaced with, and it always carries the
+/// uncompressed suffix: with `tile_url_gz` on the CACHED file is .gph.gz, but the URL is
+/// unchanged, so the two differ deliberately.
+///
+/// Empty for a coordinate that is not on the planet. A class method, since it needs no actor.
+/// NS_SWIFT_NAME because the importer would otherwise derive `tilesCoveringLatitude(_:longitude:)`
+/// from the selector, which reads badly at every call site.
++ (NSArray<NSDictionary*>*)tilesCoveringLatitude:(double)latitude longitude:(double)longitude
+    NS_SWIFT_NAME(tilesCovering(latitude:longitude:));
+
+/// Ensures one tile is in `mjolnir.tile_dir`, fetching it through valhalla if it is not.
+///
+/// `true` or `false` as JSON, or the error envelope when the fetch was cancelled or failed, or
+/// the tile could not be written. `false` is a tile the origin does not have, which is normal coverage
+/// rather than a failure: a tile that is all sea has no roads, so a tile set need not include it.
+- (NSString*)ensureTileCachedAtLevel:(uint32_t)level tileId:(uint32_t)tileId
+    NS_SWIFT_NAME(ensureTileCached(level:id:));
+
 /// Asks the action running now to stop, before its next tile fetch or during its path search.
 /// Sticky until `resume`.
 - (void)cancel;
