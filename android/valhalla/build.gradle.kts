@@ -119,7 +119,10 @@ tasks.named("preBuild") {
 
 mavenPublishing {
     publishToMavenCentral(SonatypeHost.CENTRAL_PORTAL)
-    signAllPublications()
+    // Maven Central needs signatures; a local install doesn't, and fails without a key.
+    if (project.findProperty("valhalla.skipSigning") != "true") {
+        signAllPublications()
+    }
 
     if (project.version.toString() === "unspecified") {
         throw IllegalArgumentException("Version must be specified")
