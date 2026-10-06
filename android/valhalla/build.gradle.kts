@@ -81,7 +81,18 @@ dependencies {
     androidTestImplementation(libs.androidx.test.rules)
 }
 
-val archs = listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+val allArchs = listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+
+// Every ABI by default. -Pvalhalla.abis=arm64-v8a,x86_64 builds only those, since each
+// one is a full valhalla compile.
+val archs =
+    (findProperty("valhalla.abis") as String?)
+        ?.split(",")
+        ?.map { it.trim() }
+        ?.filter { it.isNotEmpty() }
+        ?.onEach { require(it in allArchs) { "valhalla.abis: $it is not one of $allArchs" } }
+        ?.takeIf { it.isNotEmpty() }
+        ?: allArchs
 
 // Define a custom task to run the shell script
 archs.forEach { arch ->
@@ -103,10 +114,7 @@ archs.forEach { arch ->
 
 tasks.named("preBuild") {
     // Efficiently build any architecture that doesn't exist in jniLibs.
-    dependsOn("buildValhallaFor-arm64-v8a")
-    dependsOn("buildValhallaFor-armeabi-v7a")
-    dependsOn("buildValhallaFor-x86_64")
-    dependsOn("buildValhallaFor-x86")
+    archs.forEach { dependsOn("buildValhallaFor-$it") }
 }
 
 mavenPublishing {
