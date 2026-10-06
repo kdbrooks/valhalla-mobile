@@ -61,6 +61,9 @@ fi
 platform=""
 arch=""
 clean=false
+# Set here because `if $clean_all` takes the true branch when the variable is
+# empty, which made every run delete build/.
+clean_all=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
