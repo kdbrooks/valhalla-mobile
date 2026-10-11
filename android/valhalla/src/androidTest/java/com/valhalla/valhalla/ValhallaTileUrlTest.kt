@@ -14,6 +14,9 @@ import java.io.File
 import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 import org.json.JSONObject
@@ -234,10 +237,40 @@ class ValhallaTileUrlTest {
     }
   }
 
+  @Test
+  fun testCancelStopsARunningActionUntilResumed() {
+    val fetching = CountDownLatch(1)
+    val release = CountDownLatch(1)
+    client.answer = {
+      fetching.countDown()
+      release.await(10, TimeUnit.SECONDS)
+      null
+    }
+    actor().use { actor ->
+      val executor = Executors.newSingleThreadExecutor()
+      try {
+        val running = executor.submit<String> { actor.routeStatus() }
+        assertTrue(fetching.await(10, TimeUnit.SECONDS))
+
+        // The running action holds the actor's lock, which cancel must not wait for.
+        actor.cancel()
+        release.countDown()
+        assertEquals(CANCELLED, running.get(10, TimeUnit.SECONDS))
+      } finally {
+        executor.shutdown()
+      }
+
+      client.answer = { null }
+      actor.resume()
+      assertEquals(FOUND, actor.routeStatus())
+    }
+  }
+
   private companion object {
     const val FOUND = "Found route between points"
     const val FETCH_FAILED = "valhalla-mobile: tile fetch failed"
     const val TIMED_OUT = "valhalla-mobile: tile fetch deadline"
+    const val CANCELLED = "valhalla-mobile: cancelled"
     const val ANDORRA_ROUTE =
         "{\"locations\":[{\"lat\":42.5063,\"lon\":1.5218},{\"lat\":42.5086,\"lon\":1.5394}],\"costing\":\"auto\",\"units\":\"miles\"}"
   }

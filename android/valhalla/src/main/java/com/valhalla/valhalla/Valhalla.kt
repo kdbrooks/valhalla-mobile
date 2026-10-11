@@ -336,6 +336,15 @@ internal constructor(
   }
 
   /**
+   * Stop the running action, before its next tile download or during its search. Lasts until
+   * [resume].
+   */
+  fun cancel() = valhallaActor.cancel()
+
+  /** Clear a previous [cancel]. */
+  fun resume() = valhallaActor.resume()
+
+  /**
    * Release the native actor held by this instance. Safe to call more than once.
    *
    * Any request attempted after this throws [IllegalStateException].

@@ -64,7 +64,10 @@ std::string trace_route(const char *request, void* actor);
 std::string trace_attributes(const char *request, void* actor);
 std::string height(const char *request, void* actor);
 std::string matrix(const char *request, void* actor);
-void* create_valhalla_actor(const char *config_path, ValhallaMobileHttpClient* http_client = nullptr);
+/// @param cancel_flag  optional, not owned, and must outlive the actor.
+void* create_valhalla_actor(const char *config_path,
+                            ValhallaMobileHttpClient* http_client = nullptr,
+                            std::atomic<bool>* cancel_flag = nullptr);
 void delete_valhalla_actor(void* actor);
 
 #endif

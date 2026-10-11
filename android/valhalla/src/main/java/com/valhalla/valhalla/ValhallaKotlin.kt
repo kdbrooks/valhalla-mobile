@@ -35,4 +35,6 @@ internal class ValhallaKotlin {
   external fun height(handle: Long, request: ByteArray): ByteArray
 
   external fun matrix(handle: Long, request: ByteArray): ByteArray
+
+  external fun setCancelled(handle: Long, cancelled: Boolean)
 }

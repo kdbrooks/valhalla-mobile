@@ -1,6 +1,7 @@
 #ifndef VALHALLAACTOR_H
 #define VALHALLAACTOR_H
 
+#include <atomic>
 #include <chrono>
 #include <string>
 #include <valhalla/tyr/actor.h>
@@ -56,6 +57,8 @@ private:
     std::chrono::steady_clock::rep fetch_time = 0;
     /// Run by the tile getter before each request: stops the action once its budget is spent.
     std::function<void()> before_fetch;
+    /// Passed to every action, which runs it during its search: stops it once cancelled.
+    std::function<void()> interrupt;
     std::unique_ptr<valhalla::tyr::actor_t> actor;
     std::unique_ptr<RetryingGraphReader> graph_reader;
 
@@ -64,11 +67,20 @@ private:
     /// Set when the running action ran out of time. Loki catches what a tile fetch throws
     /// during its search, so the action can't tell otherwise.
     bool timed_out = false;
+    /// Set when a cancel stopped the running action, for the same reason.
+    bool was_cancelled = false;
+    /// The caller's cancel flag when given, else one that stays false.
+    std::atomic<bool> owned_cancelled{false};
+    std::atomic<bool>* cancelled = &owned_cancelled;
 
     /// Runs one action, after letting it retry tiles that failed to download in earlier ones.
     std::string run(const std::function<std::string()>& action);
 public:
-    ValhallaActor(const std::string& config_path, ValhallaMobileHttpClient* http_client = nullptr);
+    /// @param cancel_flag  optional and not owned: set it to stop the running action before its
+    ///                     next tile download or during its search. It must outlive the actor.
+    ValhallaActor(const std::string& config_path,
+                  ValhallaMobileHttpClient* http_client = nullptr,
+                  std::atomic<bool>* cancel_flag = nullptr);
     ~ValhallaActor();
 
     /// The message of an action that failed after a tile download failed other than with a
@@ -77,6 +89,8 @@ public:
     /// The message of an action that spent more than `mjolnir.tile_url_timeout` seconds
     /// downloading tiles.
     static constexpr const char* kTimedOutMessage = "valhalla-mobile: tile fetch deadline";
+    /// The message of an action stopped by the cancel flag.
+    static constexpr const char* kCancelledMessage = "valhalla-mobile: cancelled";
 
     /**
      * Compute a route between the given locations. This is Valhalla's `route`

@@ -372,7 +372,12 @@ template <typename Action> std::string run_on_deep_stack(Action&& action) {
 
 } // namespace
 
-ValhallaActor::ValhallaActor(const std::string& config_path, ValhallaMobileHttpClient* http_client) {
+ValhallaActor::ValhallaActor(const std::string& config_path,
+                             ValhallaMobileHttpClient* http_client,
+                             std::atomic<bool>* cancel_flag) {
+    if (cancel_flag != nullptr) {
+        cancelled = cancel_flag;
+    }
     // Take ownership of the client immediately so it is freed on any early
     // return or exception below, and regardless of whether a getter is attached.
     std::unique_ptr<ValhallaMobileHttpClient> http_client_owned(http_client);
@@ -416,7 +421,14 @@ ValhallaActor::ValhallaActor(const std::string& config_path, ValhallaMobileHttpC
     tile_fetch_timeout_seconds =
         std::max(0.0, mjolnir_config.get<double>("tile_url_timeout", 0.0));
     // Set only now, so downloads the reader makes while it's built are never stopped.
+    interrupt = [this]() {
+      if (cancelled->load(std::memory_order_relaxed)) {
+        was_cancelled = true;
+        throw std::runtime_error(kCancelledMessage);
+      }
+    };
     before_fetch = [this]() {
+      interrupt();
       if (fetch_budget != 0 && fetch_time > fetch_budget) {
         timed_out = true;
         throw std::runtime_error(kTimedOutMessage);
@@ -432,6 +444,7 @@ std::string ValhallaActor::run(const std::function<std::string()>& action) {
     graph_reader->forget_failures();
     const auto failures = fetch_failures;
     timed_out = false;
+    was_cancelled = false;
     fetch_time = 0;
     const auto budget = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
         std::chrono::duration<double>(tile_fetch_timeout_seconds));
@@ -442,6 +455,9 @@ std::string ValhallaActor::run(const std::function<std::string()>& action) {
     try {
         answer = action();
     } catch (...) {
+        if (was_cancelled) {
+            throw std::runtime_error(kCancelledMessage);
+        }
         if (timed_out) {
             throw std::runtime_error(kTimedOutMessage);
         }
@@ -451,6 +467,9 @@ std::string ValhallaActor::run(const std::function<std::string()>& action) {
         }
         throw;
     }
+    if (was_cancelled) {
+        throw std::runtime_error(kCancelledMessage);
+    }
     if (timed_out) {
         throw std::runtime_error(kTimedOutMessage);
     }
@@ -459,30 +478,31 @@ std::string ValhallaActor::run(const std::function<std::string()>& action) {
 
 std::string ValhallaActor::route(const std::string& request) {
     return run([&]() {
-        return run_on_deep_stack([&]() { return actor->route(request); });
+        return run_on_deep_stack([&]() { return actor->route(request, &interrupt); });
     });
 }
 
 std::string ValhallaActor::trace_route(const std::string& request) {
     return run([&]() {
-        return run_on_deep_stack([&]() { return actor->trace_route(request); });
+        return run_on_deep_stack([&]() { return actor->trace_route(request, &interrupt); });
     });
 }
 
 std::string ValhallaActor::trace_attributes(const std::string& request) {
     return run([&]() {
-        return run_on_deep_stack([&]() { return actor->trace_attributes(request); });
+        return run_on_deep_stack(
+            [&]() { return actor->trace_attributes(request, &interrupt); });
     });
 }
 
 std::string ValhallaActor::height(const std::string& request) {
     return run([&]() {
-        return run_on_deep_stack([&]() { return actor->height(request); });
+        return run_on_deep_stack([&]() { return actor->height(request, &interrupt); });
     });
 }
 
 std::string ValhallaActor::matrix(const std::string& request) {
     return run([&]() {
-        return run_on_deep_stack([&]() { return actor->matrix(request); });
+        return run_on_deep_stack([&]() { return actor->matrix(request, &interrupt); });
     });
 }

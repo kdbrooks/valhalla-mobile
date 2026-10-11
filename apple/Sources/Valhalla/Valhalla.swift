@@ -29,6 +29,10 @@ public protocol ValhallaProviding {
 
     func matrix(rawRequest: String) throws -> String
 
+    func cancel()
+
+    func resume()
+
     func close()
 }
 
@@ -247,6 +251,17 @@ public final class Valhalla: ValhallaProviding {
     ///   or ``ValhallaError/closed`` after ``close()``.
     public func matrix(rawRequest request: String) throws -> String {
         try checkForError(try withActor { $0.matrix(request) })
+    }
+
+    /// Stops the running action, before its next tile download or during its search. Lasts
+    /// until ``resume()``. Doesn't take ``lock``, which the running action holds.
+    public func cancel() {
+        actor.cancel()
+    }
+
+    /// Clears a previous ``cancel()``.
+    public func resume() {
+        actor.resume()
     }
 
     /// Releases the native actor held by this instance, and with it the mmapped tile

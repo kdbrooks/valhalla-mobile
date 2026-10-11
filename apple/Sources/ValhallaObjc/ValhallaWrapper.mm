@@ -1,3 +1,5 @@
+#include <atomic>
+
 #import "ValhallaWrapper.h"
 
 #import <include/main.h>
@@ -223,7 +225,9 @@ NSString* PerformAction(ActorAction action,
     try {
         // Create the network interface implementation for iOS
         ValhallaMobileHttpClient* httpClient = new ValhallaMobileHttpClientImpl();
-        _actor = create_valhalla_actor(path.c_str(), httpClient);
+        _cancelFlag = new std::atomic<bool>(false);
+        _actor = create_valhalla_actor(path.c_str(), httpClient,
+                                       static_cast<std::atomic<bool>*>(_cancelFlag));
     } catch (NSException *exception) {
         *error = [[NSError alloc] initWithDomain:exception.name code:0 userInfo:@{
             NSUnderlyingErrorKey: exception,
@@ -287,9 +291,21 @@ NSString* PerformAction(ActorAction action,
     }
 }
 
+- (void)cancel
+{
+    // Not @synchronized: the running action holds the monitor.
+    static_cast<std::atomic<bool>*>(_cancelFlag)->store(true, std::memory_order_relaxed);
+}
+
+- (void)resume
+{
+    static_cast<std::atomic<bool>*>(_cancelFlag)->store(false, std::memory_order_relaxed);
+}
+
 - (void) dealloc
 {
     [self close];
+    delete static_cast<std::atomic<bool>*>(_cancelFlag);
 }
 
 @end

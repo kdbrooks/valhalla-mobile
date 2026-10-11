@@ -15,6 +15,10 @@ internal interface ValhallaActorProviding : Closeable {
   fun height(request: String): String
 
   fun matrix(request: String): String
+
+  fun cancel()
+
+  fun resume()
 }
 
 /**
@@ -41,7 +45,10 @@ internal class ValhallaActor(
   private val valhallaKotlin = ValhallaKotlin()
   private val lock = Any()
 
-  /** Zero once closed. Guarded by [lock]. */
+  /** Taken by [cancel], which can't wait for [lock], and by [close] to free [handle]. */
+  private val handleLock = Any()
+
+  /** Zero once closed. Written under both [lock] and [handleLock]. */
   private var handle: Long = valhallaKotlin.createActor(configPath, httpClient)
 
   init {
@@ -86,6 +93,14 @@ internal class ValhallaActor(
    */
   override fun matrix(request: String): String = perform(request, valhallaKotlin::matrix)
 
+  override fun cancel() {
+    synchronized(handleLock) { if (handle != 0L) valhallaKotlin.setCancelled(handle, true) }
+  }
+
+  override fun resume() {
+    synchronized(handleLock) { if (handle != 0L) valhallaKotlin.setCancelled(handle, false) }
+  }
+
   /**
    * Release the native actor. Safe to call more than once; later calls do nothing.
    *
@@ -93,9 +108,11 @@ internal class ValhallaActor(
    */
   override fun close() {
     synchronized(lock) {
-      if (handle != 0L) {
-        valhallaKotlin.deleteActor(handle)
-        handle = 0L
+      synchronized(handleLock) {
+        if (handle != 0L) {
+          valhallaKotlin.deleteActor(handle)
+          handle = 0L
+        }
       }
     }
   }
