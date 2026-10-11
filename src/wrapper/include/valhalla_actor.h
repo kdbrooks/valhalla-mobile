@@ -1,6 +1,7 @@
 #ifndef VALHALLAACTOR_H
 #define VALHALLAACTOR_H
 
+#include <chrono>
 #include <string>
 #include <valhalla/tyr/actor.h>
 #include <valhalla/baldr/tilegetter.h>
@@ -49,8 +50,20 @@ private:
     /// Tile downloads that failed other than with a 404 or 410. Declared before the reader,
     /// whose tile getter counts into it.
     uint32_t fetch_failures = 0;
+    /// How long the running action may spend downloading tiles, in steady_clock ticks (0 for
+    /// no limit), and how long it has. The tile getter reads and adds to them.
+    std::chrono::steady_clock::rep fetch_budget = 0;
+    std::chrono::steady_clock::rep fetch_time = 0;
+    /// Run by the tile getter before each request: stops the action once its budget is spent.
+    std::function<void()> before_fetch;
     std::unique_ptr<valhalla::tyr::actor_t> actor;
     std::unique_ptr<RetryingGraphReader> graph_reader;
+
+    /// `mjolnir.tile_url_timeout`, in seconds, or 0 for no limit.
+    double tile_fetch_timeout_seconds = 0.0;
+    /// Set when the running action ran out of time. Loki catches what a tile fetch throws
+    /// during its search, so the action can't tell otherwise.
+    bool timed_out = false;
 
     /// Runs one action, after letting it retry tiles that failed to download in earlier ones.
     std::string run(const std::function<std::string()>& action);
@@ -61,6 +74,9 @@ public:
     /// The message of an action that failed after a tile download failed other than with a
     /// 404 or 410.
     static constexpr const char* kFetchFailedMessage = "valhalla-mobile: tile fetch failed";
+    /// The message of an action that spent more than `mjolnir.tile_url_timeout` seconds
+    /// downloading tiles.
+    static constexpr const char* kTimedOutMessage = "valhalla-mobile: tile fetch deadline";
 
     /**
      * Compute a route between the given locations. This is Valhalla's `route`

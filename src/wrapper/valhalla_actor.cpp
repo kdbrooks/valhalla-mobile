@@ -123,15 +123,23 @@ public:
    *                      in which case requests report FAILURE.
    * @param is_gzipped  whether valhalla stores tiles gzip-compressed
    * @param failures  counts downloads that fail other than with a 404 or 410
+   * @param before_fetch  run before each request once set; throws to stop the action
+   * @param fetch_time  the time the running action has spent in requests, added to here
    */
   TileGetterWrapper(std::unique_ptr<ValhallaMobileHttpClient> http_client, bool is_gzipped,
-                    uint32_t* failures)
-      : is_gzipped(is_gzipped), failures_(failures), http_client(std::move(http_client)) {
+                    uint32_t* failures, const std::function<void()>* before_fetch,
+                    std::chrono::steady_clock::rep* fetch_time)
+      : is_gzipped(is_gzipped), failures_(failures), before_fetch_(before_fetch),
+        fetch_time_(fetch_time), http_client(std::move(http_client)) {
   }
 
   GET_response_t get(const std::string& url,
                      const uint64_t range_offset = 0,
                      const uint64_t range_size = 0) override {
+    if (*before_fetch_) {
+      (*before_fetch_)();
+    }
+    const FetchTimer timer{fetch_time_};
     GET_response_t result;
     if (!http_client) {
       result.status_ = tile_getter_t::status_code_t::FAILURE;
@@ -165,6 +173,10 @@ public:
   }
 
   HEAD_response_t head(const std::string& url, header_mask_t header_mask) override {
+    if (*before_fetch_) {
+      (*before_fetch_)();
+    }
+    const FetchTimer timer{fetch_time_};
     HEAD_response_t result;
     if (http_client) { 
         result = http_client->head(url, header_mask);
@@ -179,6 +191,15 @@ public:
   }
 
 private:
+  // Adds the time one request takes to the running action's total.
+  struct FetchTimer {
+    std::chrono::steady_clock::rep* total;
+    std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+    ~FetchTimer() {
+      *total += (std::chrono::steady_clock::now() - started).count();
+    }
+  };
+
   // Anything but a 404 or 410 may be the connection, so the next action tries it again.
   void count_failure(const GET_response_t& result) const {
     if (result.http_code_ != 404 && result.http_code_ != 410) {
@@ -214,6 +235,8 @@ private:
 
   bool is_gzipped;
   uint32_t* failures_;
+  const std::function<void()>* before_fetch_;
+  std::chrono::steady_clock::rep* fetch_time_;
   std::unique_ptr<ValhallaMobileHttpClient> http_client;
 };
 
@@ -384,11 +407,21 @@ ValhallaActor::ValhallaActor(const std::string& config_path, ValhallaMobileHttpC
         printf("[ValhallaActor] tile_url_gz is ignored for a tar tile_url or without a tile_dir\n");
       }
       tile_getter = std::make_unique<TileGetterWrapper>(std::move(http_client_owned), gzipped,
-                                                        &fetch_failures);
+                                                        &fetch_failures, &before_fetch,
+                                                        &fetch_time);
     }
     graph_reader = std::make_unique<RetryingGraphReader>(
       mjolnir_config, std::move(tile_getter), &fetch_failures
     );
+    tile_fetch_timeout_seconds =
+        std::max(0.0, mjolnir_config.get<double>("tile_url_timeout", 0.0));
+    // Set only now, so downloads the reader makes while it's built are never stopped.
+    before_fetch = [this]() {
+      if (fetch_budget != 0 && fetch_time > fetch_budget) {
+        timed_out = true;
+        throw std::runtime_error(kTimedOutMessage);
+      }
+    };
     // Setup the actor
     actor = std::make_unique<valhalla::tyr::actor_t>(config, *graph_reader, true);
 }
@@ -398,15 +431,30 @@ ValhallaActor::~ValhallaActor() = default;
 std::string ValhallaActor::run(const std::function<std::string()>& action) {
     graph_reader->forget_failures();
     const auto failures = fetch_failures;
+    timed_out = false;
+    fetch_time = 0;
+    const auto budget = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+        std::chrono::duration<double>(tile_fetch_timeout_seconds));
+    fetch_budget = tile_fetch_timeout_seconds > 0
+                       ? std::max<std::chrono::steady_clock::rep>(budget.count(), 1)
+                       : 0;
+    std::string answer;
     try {
-        return action();
+        answer = action();
     } catch (...) {
+        if (timed_out) {
+            throw std::runtime_error(kTimedOutMessage);
+        }
         // Loki answers for a tile it could not fetch as for a location with no roads (171).
         if (fetch_failures != failures) {
             throw std::runtime_error(kFetchFailedMessage);
         }
         throw;
     }
+    if (timed_out) {
+        throw std::runtime_error(kTimedOutMessage);
+    }
+    return answer;
 }
 
 std::string ValhallaActor::route(const std::string& request) {

@@ -97,12 +97,17 @@ class ValhallaTileUrlTest {
     if (::tilesDir.isInitialized) tilesDir.deleteRecursively()
   }
 
-  private fun actor(gzipped: Boolean = false): ValhallaActor {
+  private fun actor(gzipped: Boolean = false, timeoutSeconds: Double = 0.0): ValhallaActor {
     val config =
         ValhallaConfigFactory.usingTileUrl(
             "${FakeTileClient.BASE_URL}{tilePath}", tilesDir.absolutePath, gzipped)
     val file = ValhallaFile(context, "tile-url.json")
     ValhallaConfigManager(context, file).writeConfig(config)
+    // The config models have no field for the timeout, so it goes into the written JSON.
+    val written = File(file.absolutePath())
+    val json = JSONObject(written.readText())
+    json.getJSONObject("mjolnir").put("tile_url_timeout", timeoutSeconds)
+    written.writeText(json.toString())
     return ValhallaActor(file.absolutePath(), client)
   }
 
@@ -213,9 +218,26 @@ class ValhallaTileUrlTest {
     }
   }
 
+  @Test
+  fun testDeadlineStopsTheActionBeforeItsNextFetch() {
+    client.answer = {
+      Thread.sleep(1_500)
+      null
+    }
+    actor(timeoutSeconds = 1.0).use { actor ->
+      assertEquals(TIMED_OUT, actor.routeStatus())
+      assertEquals(1, client.requests.size)
+
+      // Each action gets its own budget.
+      client.answer = { null }
+      assertEquals(FOUND, actor.routeStatus())
+    }
+  }
+
   private companion object {
     const val FOUND = "Found route between points"
     const val FETCH_FAILED = "valhalla-mobile: tile fetch failed"
+    const val TIMED_OUT = "valhalla-mobile: tile fetch deadline"
     const val ANDORRA_ROUTE =
         "{\"locations\":[{\"lat\":42.5063,\"lon\":1.5218},{\"lat\":42.5086,\"lon\":1.5394}],\"costing\":\"auto\",\"units\":\"miles\"}"
   }
