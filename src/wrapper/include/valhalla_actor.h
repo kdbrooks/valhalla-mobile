@@ -101,6 +101,26 @@ public:
      * @return         the serialized response, in whichever format the request asked for
      */
     std::string matrix(const std::string& request);
+
+    /**
+     * Valhalla's Python binding `get_tile_ids_from_bbox`: the graph tiles that intersect a
+     * bounding box.
+     *
+     * @param request  `{"minx":…,"miny":…,"maxx":…,"maxy":…,"levels":[…]}`, in degrees. Without
+     *                 `levels`, every road level: 0, 1 and 2.
+     * @return         `{"tile_ids":[…]}`, each a GraphId as `GraphId::json` writes it
+     */
+    std::string get_tile_ids_from_bbox(const std::string& request);
+
+    /**
+     * Valhalla's `GraphReader::GetGraphTileHeader`, which downloads the tile from `tile_url`
+     * into `tile_dir` when it isn't there.
+     *
+     * @param request  a GraphId: `{"level":…,"tile_id":…,"id":…}`
+     * @return         `{"header":{"graphid":…,"version":…,"dataset_id":…,"date_created":…}}`, or
+     *                 `{"header":null}` when the tile could not be read or downloaded
+     */
+    std::string get_graph_tile_header(const std::string& request);
 };
 
 #endif // VALHALLAACTOR_H

@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.res.AssetManager
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import com.valhalla.valhalla.config.ValhallaConfigFactory
 import com.valhalla.valhalla.config.ValhallaConfigManager
 import com.valhalla.valhalla.files.ValhallaFile
@@ -182,6 +184,27 @@ class ValhallaTileUrlTest {
         assertTrue("$name was not fetched, gzip $gzipped", client.requests.isNotEmpty())
         assertTrue("$name was stored, gzip $gzipped", storedTiles().isEmpty())
       }
+    }
+  }
+
+  @Test
+  fun testCachesTheTilesOfABox() {
+    val config =
+        ValhallaConfigFactory.usingTileUrl(
+            "${FakeTileClient.BASE_URL}{tilePath}", tilesDir.absolutePath)
+    val file = ValhallaFile(context, "tile-url.json")
+    ValhallaConfigManager(context, file).writeConfig(config)
+    val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+    Valhalla(ValhallaActor(file.absolutePath(), client), moshi).use { valhalla ->
+      val tiles = valhalla.getTileIdsFromBbox(1.5218, 42.5063, 1.5394, 42.5086)
+      assertEquals(listOf(GraphId(0, 3015), GraphId(1, 47701), GraphId(2, 763926)), tiles)
+
+      tiles.forEach { assertEquals(it, valhalla.getGraphTileHeader(it)?.graphId) }
+      assertEquals(
+          setOf("0/003/015.gph", "1/047/701.gph", "2/000/763/926.gph"), storedTiles().keys)
+
+      // One the server doesn't have.
+      assertNull(valhalla.getGraphTileHeader(GraphId(2, 0)))
     }
   }
 

@@ -20,6 +20,8 @@ import com.valhalla.config.models.ValhallaConfig
 import com.valhalla.valhalla.config.ValhallaConfigManager
 import java.io.Closeable
 import java.io.IOException
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Main entry point for the Valhalla routing engine on Android.
@@ -295,6 +297,55 @@ internal constructor(
   fun matrixRaw(requestJson: String): String {
     return checkForError(valhallaActor.matrix(requestJson))
   }
+
+  /**
+   * Valhalla's Python binding `get_tile_ids_from_bbox`: the graph tiles that intersect a bounding
+   * box.
+   *
+   * @param levels The hierarchy levels to list. Empty means every road level: 0, 1 and 2.
+   * @throws ValhallaException.Internal if Valhalla rejects the box or a level.
+   */
+  fun getTileIdsFromBbox(
+      minLon: Double,
+      minLat: Double,
+      maxLon: Double,
+      maxLat: Double,
+      levels: List<Int> = emptyList(),
+  ): List<GraphId> {
+    val request =
+        JSONObject()
+            .put("minx", minLon)
+            .put("miny", minLat)
+            .put("maxx", maxLon)
+            .put("maxy", maxLat)
+            .put("levels", JSONArray(levels))
+    val response = checkForError(valhallaActor.getTileIdsFromBbox(request.toString()))
+    val tiles = JSONObject(response).getJSONArray("tile_ids")
+    return List(tiles.length()) { graphId(tiles.getJSONObject(it)) }
+  }
+
+  /**
+   * Valhalla's `GraphReader::GetGraphTileHeader`, which downloads the tile from the config's
+   * `tile_url` into its `tile_dir` when it isn't there.
+   *
+   * @return null when the tile could not be read or downloaded.
+   * @throws ValhallaException.Internal if Valhalla rejects the id.
+   */
+  fun getGraphTileHeader(graphId: GraphId): GraphTileHeader? {
+    val request =
+        JSONObject().put("level", graphId.level).put("tile_id", graphId.tileId).put("id", graphId.id)
+    val response = checkForError(valhallaActor.getGraphTileHeader(request.toString()))
+    val header = JSONObject(response).optJSONObject("header") ?: return null
+    return GraphTileHeader(
+        graphId(header.getJSONObject("graphid")),
+        header.getString("version"),
+        header.getLong("dataset_id"),
+        header.getInt("date_created"))
+  }
+
+  /** A GraphId as Valhalla's `GraphId::json` writes it. */
+  private fun graphId(json: JSONObject) =
+      GraphId(json.getInt("level"), json.getInt("tile_id"), json.getInt("id"))
 
   /**
    * Decodes [rawResponse] into [type].

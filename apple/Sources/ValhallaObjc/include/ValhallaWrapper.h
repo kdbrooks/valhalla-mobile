@@ -38,6 +38,14 @@
 /// @param request a `sources_to_targets` request as JSON.
 - (NSString*)matrix:(NSString*)request;
 
+/// Valhalla's Python binding `get_tile_ids_from_bbox`.
+/// @param request `{"minx":…,"miny":…,"maxx":…,"maxy":…,"levels":[…]}` as JSON.
+- (NSString*)getTileIdsFromBbox:(NSString*)request NS_SWIFT_NAME(getTileIdsFromBbox(_:));
+
+/// Valhalla's `GraphReader::GetGraphTileHeader`.
+/// @param request a GraphId, `{"level":…,"tile_id":…,"id":…}`, as JSON.
+- (NSString*)getGraphTileHeader:(NSString*)request NS_SWIFT_NAME(getGraphTileHeader(_:));
+
 @end
 
 #endif /* ValhallaWrapperHeader_h */

@@ -35,4 +35,8 @@ internal class ValhallaKotlin {
   external fun height(handle: Long, request: ByteArray): ByteArray
 
   external fun matrix(handle: Long, request: ByteArray): ByteArray
+
+  external fun getTileIdsFromBbox(handle: Long, request: ByteArray): ByteArray
+
+  external fun getGraphTileHeader(handle: Long, request: ByteArray): ByteArray
 }

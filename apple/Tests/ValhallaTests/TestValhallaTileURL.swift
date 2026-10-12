@@ -75,4 +75,26 @@ final class TestValhallaTileURL: XCTestCase {
             XCTAssertEqual(try Data(contentsOf: tile).prefix(2), Data([0x1f, 0x8b]), tile.path)
         }
     }
+
+    func testCachesTheTilesOfABox() throws {
+        let config = try ValhallaConfig(tilesUrl: "http://tiles.invalid/{tilePath}", tilesDir: tilesDir)
+        let valhalla = try Valhalla(config, configName: "tile-url.json")
+
+        let tiles = try valhalla.getTileIdsFromBbox(minLon: 1.5218, minLat: 42.5063, maxLon: 1.5394, maxLat: 42.5086)
+        XCTAssertEqual(tiles, [
+            GraphId(level: 0, tileId: 3015),
+            GraphId(level: 1, tileId: 47701),
+            GraphId(level: 2, tileId: 763926)
+        ])
+
+        for tile in tiles {
+            XCTAssertEqual(try valhalla.getGraphTileHeader(tile)?.graphId, tile)
+        }
+        for path in ["0/003/015.gph", "1/047/701.gph", "2/000/763/926.gph"] {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: tilesDir.appendingPathComponent(path).path), path)
+        }
+
+        // One the server doesn't have.
+        XCTAssertNil(try valhalla.getGraphTileHeader(GraphId(level: 2, tileId: 0)))
+    }
 }

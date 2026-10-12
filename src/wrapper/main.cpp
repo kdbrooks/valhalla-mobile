@@ -601,6 +601,30 @@ Java_com_valhalla_valhalla_ValhallaKotlin_matrix(JNIEnv *env,
     return run_jni_action(env, handle, jRequest, &ValhallaActor::matrix, "matrix");
 }
 
+extern "C"
+JNIEXPORT jbyteArray
+
+JNICALL
+Java_com_valhalla_valhalla_ValhallaKotlin_getTileIdsFromBbox(JNIEnv *env,
+                                                       jobject thiz,
+                                                       jlong handle,
+                                                       jbyteArray jRequest) {
+    return run_jni_action(env, handle, jRequest, &ValhallaActor::get_tile_ids_from_bbox,
+                          "get_tile_ids_from_bbox");
+}
+
+extern "C"
+JNIEXPORT jbyteArray
+
+JNICALL
+Java_com_valhalla_valhalla_ValhallaKotlin_getGraphTileHeader(JNIEnv *env,
+                                                       jobject thiz,
+                                                       jlong handle,
+                                                       jbyteArray jRequest) {
+    return run_jni_action(env, handle, jRequest, &ValhallaActor::get_graph_tile_header,
+                          "get_graph_tile_header");
+}
+
 #elif __APPLE__
 void* create_valhalla_actor(const char *config_path, ValhallaMobileHttpClient* http_client) {
     return new ValhallaActor(config_path, http_client);
@@ -637,6 +661,18 @@ std::string height(const char *request, void* actor) {
 std::string matrix(const char *request, void* actor) {
     return invoke_action("matrix", [&]() {
         return ((ValhallaActor*) actor)->matrix(request);
+    });
+}
+
+std::string get_tile_ids_from_bbox(const char *request, void* actor) {
+    return invoke_action("get_tile_ids_from_bbox", [&]() {
+        return ((ValhallaActor*) actor)->get_tile_ids_from_bbox(request);
+    });
+}
+
+std::string get_graph_tile_header(const char *request, void* actor) {
+    return invoke_action("get_graph_tile_header", [&]() {
+        return ((ValhallaActor*) actor)->get_graph_tile_header(request);
     });
 }
 #endif

@@ -5,6 +5,7 @@
 #include <exception>
 #include <limits>
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -19,6 +20,7 @@
 #include <valhalla/baldr/compression_utils.h>
 #include <valhalla/baldr/graphtile.h>
 #include <valhalla/baldr/graphtileheader.h>
+#include <valhalla/baldr/tilehierarchy.h>
 #include <valhalla/baldr/rapidjson_utils.h>
 #include <valhalla/loki/worker.h>
 #include "valhalla_actor.h"
@@ -360,4 +362,79 @@ std::string ValhallaActor::height(const std::string& request) {
 
 std::string ValhallaActor::matrix(const std::string& request) {
     return run_on_deep_stack([&]() { return actor->matrix(request); });
+}
+
+std::string ValhallaActor::get_tile_ids_from_bbox(const std::string& request) {
+    boost::property_tree::ptree options;
+    std::istringstream stream(request);
+    rapidjson::read_json(stream, options);
+    const auto minx = options.get<double>("minx");
+    const auto miny = options.get<double>("miny");
+    const auto maxx = options.get<double>("maxx");
+    const auto maxy = options.get<double>("maxy");
+    // The checks and the default levels are those of Valhalla's Python binding.
+    if (minx < -180. || maxx > 180. || miny < -90. || maxy > 90.) {
+        throw std::invalid_argument("Invalid coordinate, remember it's (lon, lat)");
+    }
+    std::vector<uint32_t> levels;
+    if (const auto requested = options.get_child_optional("levels")) {
+        for (const auto& level : *requested) {
+            levels.push_back(level.second.get_value<uint32_t>());
+        }
+    }
+    if (levels.empty()) {
+        levels = {0, 1, 2};
+    }
+
+    const auto& hierarchy = valhalla::baldr::TileHierarchy::levels();
+    const valhalla::midgard::AABB2<valhalla::midgard::PointLL> bbox{minx, miny, maxx, maxy};
+    rapidjson::writer_wrapper_t writer(4096);
+    writer.start_object();
+    writer.start_array("tile_ids");
+    for (const auto level : levels) {
+        if (level >= hierarchy.size()) {
+            throw std::invalid_argument("We only support " + std::to_string(hierarchy.size()) +
+                                        " hierarchy levels.");
+        }
+        for (const auto tile_id : hierarchy[level].tiles.TileList(bbox)) {
+            writer.start_object();
+            valhalla::baldr::GraphId(static_cast<uint32_t>(tile_id), level, 0).json(writer);
+            writer.end_object();
+        }
+    }
+    writer.end_array();
+    writer.end_object();
+    return writer.get_buffer();
+}
+
+std::string ValhallaActor::get_graph_tile_header(const std::string& request) {
+    boost::property_tree::ptree options;
+    std::istringstream stream(request);
+    rapidjson::read_json(stream, options);
+    const valhalla::baldr::GraphId graph_id(options.get<uint32_t>("tile_id"),
+                                            options.get<uint32_t>("level"),
+                                            options.get<uint32_t>("id", 0));
+    const auto header = graph_reader->GetGraphTileHeader(graph_id);
+    // A downloaded tile is kept in memory as well. Valhalla's workers trim it after every
+    // action, and this is not one.
+    if (graph_reader->OverCommitted()) {
+        graph_reader->Trim();
+    }
+
+    rapidjson::writer_wrapper_t writer(256);
+    writer.start_object();
+    if (header) {
+        writer.start_object("header");
+        writer.start_object("graphid");
+        header->graphid().json(writer);
+        writer.end_object();
+        writer("version", header->version());
+        writer("dataset_id", header->dataset_id());
+        writer("date_created", header->date_created());
+        writer.end_object();
+    } else {
+        writer("header", nullptr);
+    }
+    writer.end_object();
+    return writer.get_buffer();
 }

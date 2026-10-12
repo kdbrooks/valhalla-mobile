@@ -15,6 +15,10 @@ internal interface ValhallaActorProviding : Closeable {
   fun height(request: String): String
 
   fun matrix(request: String): String
+
+  fun getTileIdsFromBbox(request: String): String
+
+  fun getGraphTileHeader(request: String): String
 }
 
 /**
@@ -85,6 +89,14 @@ internal class ValhallaActor(
    * source and every target. Same assumptions as [route].
    */
   override fun matrix(request: String): String = perform(request, valhallaKotlin::matrix)
+
+  /** Valhalla's Python binding `get_tile_ids_from_bbox`. Same assumptions as [route]. */
+  override fun getTileIdsFromBbox(request: String): String =
+      perform(request, valhallaKotlin::getTileIdsFromBbox)
+
+  /** Valhalla's `GraphReader::GetGraphTileHeader`. Same assumptions as [route]. */
+  override fun getGraphTileHeader(request: String): String =
+      perform(request, valhallaKotlin::getGraphTileHeader)
 
   /**
    * Release the native actor. Safe to call more than once; later calls do nothing.

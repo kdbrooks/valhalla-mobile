@@ -287,6 +287,20 @@ NSString* PerformAction(ActorAction action,
     }
 }
 
+- (NSString*)getTileIdsFromBbox:(NSString*)request
+{
+    @synchronized(self) {
+        return PerformAction(&get_tile_ids_from_bbox, request, _actor, "get_tile_ids_from_bbox");
+    }
+}
+
+- (NSString*)getGraphTileHeader:(NSString*)request
+{
+    @synchronized(self) {
+        return PerformAction(&get_graph_tile_header, request, _actor, "get_graph_tile_header");
+    }
+}
+
 - (void) dealloc
 {
     [self close];

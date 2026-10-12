@@ -249,6 +249,35 @@ public final class Valhalla: ValhallaProviding {
         try checkForError(try withActor { $0.matrix(request) })
     }
 
+    /// Valhalla's Python binding `get_tile_ids_from_bbox`: the graph tiles that intersect a
+    /// bounding box.
+    ///
+    /// - Parameter levels: The hierarchy levels to list. Empty means every road level: 0, 1
+    ///   and 2.
+    /// - Throws: ``ValhallaError/valhallaError(_:_:)`` when Valhalla rejects the box or a
+    ///   level.
+    public func getTileIdsFromBbox(
+        minLon: Double, minLat: Double, maxLon: Double, maxLat: Double, levels: [UInt32] = []
+    ) throws -> [GraphId] {
+        let request = try encode(
+            TileIdsRequest(minx: minLon, miny: minLat, maxx: maxLon, maxy: maxLat, levels: levels))
+        let response: TileIdsResponse = try decode(
+            try checkForError(try withActor { $0.getTileIdsFromBbox(request) }))
+        return response.tileIds
+    }
+
+    /// Valhalla's `GraphReader::GetGraphTileHeader`, which downloads the tile from the
+    /// config's `tile_url` into its `tile_dir` when it isn't there.
+    ///
+    /// - Returns: `nil` when the tile could not be read or downloaded.
+    /// - Throws: ``ValhallaError/valhallaError(_:_:)`` when Valhalla rejects the id.
+    public func getGraphTileHeader(_ graphId: GraphId) throws -> GraphTileHeader? {
+        let request = try encode(graphId)
+        let response: GraphTileHeaderResponse = try decode(
+            try checkForError(try withActor { $0.getGraphTileHeader(request) }))
+        return response.header
+    }
+
     /// Releases the native actor held by this instance, and with it the mmapped tile
     /// extract. Safe to call more than once.
     ///
